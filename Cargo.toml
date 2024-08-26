@@ -1,0 +1,11 @@
+[package]
+name = "boreal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+calamine = "0.20"
+
+[[bin]]
+name = "boreal"
+path = "src/mainReadExcel.rs"
