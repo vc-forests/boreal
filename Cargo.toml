@@ -5,6 +5,9 @@ edition = "2021"
 
 [dependencies]
 calamine = "0.20"
+regex = "1"
+printpdf = "0.3.4"
+lopdf = "0.26.0"
 
 [[bin]]
 name = "boreal"
