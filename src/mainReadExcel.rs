@@ -1,54 +1,93 @@
-use calamine::{open_workbook_auto, Reader, DataType};
+use calamine::{open_workbook_auto, DataType, Reader};
+use regex::Regex;
+use std::collections::HashSet;
 use std::error::Error;
-use std::fs::File;
-use std::io::{Write, BufWriter};
 use std::path::Path;
+use printpdf::*;
+use std::io::BufWriter;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let path = Path::new("src/doc/tfwp_2024q1_neg_en.xlsx"); // Default Read in English
 
-    /* 
-    Due to large excel file, it cannot display all of value in the terminal, 
-    I created the text file to store all of the components.
+    /*
+    Due to large excel file, it cannot display all of value in the terminal,
+    I created the PDF file to store all of the components.
+    A4 paper = 210mm x 297mm  
     */
-    let output_file_path = "output.txt";
-    let output_file = File::create(output_file_path)?;
+    let (doc, page1, layer1) = PdfDocument::new("Postal Codes", Mm(210.0), Mm(297.0), "Layer 1");
 
-    // mut: mutable
-    let mut writer = BufWriter::new(output_file);
+    // Make current_layer mutable
+    let mut current_layer = doc.get_page(page1).get_layer(layer1);
+    let font = doc.add_builtin_font(BuiltinFont::Helvetica)?;
 
-    let mut workbook = open_workbook_auto(path)?;
+    /* Canadian Postal Code:
+        D: Digits represents as \d in Rust
+        C: Characters represents as [A-Z] in Rust
+        ?: Mark space is optional, Some of Postal Code have space and some are not.
+        unwrap(): If run fails, terminate the program
+        Ex. Format: CDC DCD
+    */
+    let postal_code_regex = Regex::new(r"[A-Z]\d[A-Z] ?\d[A-Z]\d").unwrap();
 
-    /* 
+    // Store a collection of unique items like duplicate value
+    let mut unique_postal_codes = HashSet::new();
+
+    /*
     Iterate over the sheets
     to_owned: Owned copy of the list, without it, mutable borrow occurs, cannot call by references
     */
+    let mut workbook = open_workbook_auto(path)?;
+
+    let mut y_position = Mm(285.0); // Start from top of the page
+
     for sheet_name in workbook.sheet_names().to_owned() {
         if let Some(Ok(range)) = workbook.worksheet_range(&sheet_name) {
-            println!("Reading sheet: {}\nOutput generated in {}", sheet_name, output_file_path);
-            // Instead of print! in terminal, I do write! for file 
-            writeln!(writer, "Reading sheet: {}", sheet_name)?;
+            println!("Reading sheet: {}\nOutput generated in PDF", sheet_name);
 
-            /* 
-            Enumerate: i = 0 
+            /* Write the sheet name at the top
+                @param: follow by sheetname, font size, x-intercept, y-intercept, font style
+            */
+            current_layer.use_text(format!("Reading sheet: {}", sheet_name), 12.0, Mm(10.0), y_position, &font);
+
+            y_position -= Mm(10.0); // Move down for next line
+
+            /*
+            Enumerate: i = 0
             for (int i = 0; i < row.length; i++)
             */
             for (i, row) in range.rows().enumerate() {
-                write!(writer, "Row {}: ", i + 1)?; // For debugging
-                for cell in row {
-                    match cell {
-                        DataType::Int(val) => write!(writer, "{}\t", val)?,
-                        DataType::Float(val) => write!(writer, "{}\t", val)?,
-                        DataType::String(val) => write!(writer, "{}\t", val)?,
-                        DataType::Bool(val) => write!(writer, "{}\t", val)?,
-                        DataType::Empty => write!(writer, "(empty)\t")?,
-                        _ => write!(writer, "(other)\t")?,
+                if let Some(cell) = row.get(3) { // Column D is at index 3, index starts from 0
+                    if let DataType::String(val) = cell {
+                        if let Some(postal_code) = postal_code_regex.find(val) {
+                            // Store it in a HashSet if there are no duplicate value, if duplicate value occurs, it will skip writing in the PDF
+                            if unique_postal_codes.insert(postal_code.as_str().to_string()) {
+                                // Write the postal code and row number to the PDF
+                                current_layer.use_text(
+                                    format!("Row {}: {}", i + 1, postal_code.as_str()), 
+                                    10.0, 
+                                    Mm(10.0), 
+                                    y_position, 
+                                    &font
+                                );
+                                y_position -= Mm(10.0); 
+
+                                // Start a new page if the current page is full
+                                if y_position < Mm(10.0) {
+                                    y_position = Mm(285.0); // Reset y when move to new page
+                                    let (new_page, new_layer) = doc.add_page(Mm(210.0), Mm(297.0), "New Layer");
+                                    current_layer = doc.get_page(new_page).get_layer(new_layer);
+                                }
+                            }
+                        }
                     }
                 }
-                writeln!(writer)?; // New line after each row
             }
         }
     }
+
+    // Save the PDF document
+    let mut file = BufWriter::new(std::fs::File::create("output.pdf")?);
+    doc.save(&mut file)?;
 
     Ok(()) // Compile without errors
 }
