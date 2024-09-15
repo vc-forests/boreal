@@ -3,8 +3,23 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::error::Error;
 use std::path::Path;
+use std::fs::File;
 use printpdf::*;
 use std::io::BufWriter;
+use serde::Serialize;
+use csv::Writer;
+
+#[derive(Serialize)] // When declare a struct, use derive to declare a trait of that struct
+/*
+    struct created
+    @param: 
+    row: non-negative value
+    postal-code: String 
+*/
+struct PostalCode {
+    row: usize,
+    postal_code: String,
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     let path = Path::new("src/doc/tfwp_2024q1_neg_en.xlsx"); // Default Read in English
@@ -38,11 +53,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     */
     let mut workbook = open_workbook_auto(path)?;
 
+    /*
+        Vector created
+    */
+    let mut postal_codes = Vec::new();
     let mut y_position = Mm(285.0); // Start from top of the page
 
     for sheet_name in workbook.sheet_names().to_owned() {
         if let Some(Ok(range)) = workbook.worksheet_range(&sheet_name) {
-            println!("Reading sheet: {}\nOutput generated in PDF", sheet_name);
+            println!("Reading sheet: {}\nOutput generated in PDF, CSV, JSON", sheet_name);
 
             /* Write the sheet name at the top
                 @param: follow by sheetname, font size, x-intercept, y-intercept, font style
@@ -61,6 +80,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                         if let Some(postal_code) = postal_code_regex.find(val) {
                             // Store it in a HashSet if there are no duplicate value, if duplicate value occurs, it will skip writing in the PDF
                             if unique_postal_codes.insert(postal_code.as_str().to_string()) {
+                                // Push the postal code inside the vector by using the struct PostalCode
+                                postal_codes.push(PostalCode {
+                                    row: i + 1,
+                                    postal_code: postal_code.as_str().to_string(),
+                                });
+
                                 // Write the postal code and row number to the PDF
                                 current_layer.use_text(
                                     format!("Row {}: {}", i + 1, postal_code.as_str()), 
@@ -86,8 +111,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Save the PDF document
-    let mut file = BufWriter::new(std::fs::File::create("output.pdf")?);
+    let mut file = BufWriter::new(std::fs::File::create("postal_codes.pdf")?);
     doc.save(&mut file)?;
+
+    // Save as CSV31
+    let mut csv_writer = Writer::from_path("postal_codes.csv")?;
+    for entry in &postal_codes {
+        csv_writer.serialize(entry)?;
+    }
+
+    // Ensure all buffered data is written
+    csv_writer.flush()?;
+
+    // Save as JSON
+    let json_file = File::create("postal_codes.json")?;
+    serde_json::to_writer_pretty(json_file, &postal_codes)?;
 
     Ok(()) // Compile without errors
 }
